@@ -11,6 +11,9 @@ import datetime
 #import traceback
 import urllib2
 import json
+import os
+import ConfigParser
+import TSL2561
 
 PIR_PIN = 18
  
@@ -19,25 +22,29 @@ logging.basicConfig(format='%(asctime)s: %(levelname)s %(message)s', level=loggi
 
 LightSetting = collections.namedtuple('LightSetting', ['command','timeout'])
 
-BRIDGE_IP = '192.168.1.15'
-LIGHT_GROUP = 'Living Room'
+bridge_ip = None
+light_group = None
+wu_api_key = None
+zip_code = None
 
 LOOP_DELAY = 1
-DAY_TIMEOUT = 900
+DAY_TIMEOUT = 1800
 NIGHT_TIMEOUT = 180
-WU_API_KEY = 'Weather Underground API key here'
-ZIP_CODE = 'Zip Code here'
 
-MORNING_COMMAND  = {'ct' : 153, 'bri' : 202, 'on' : True}
+DAYTIME_DARKNESS_THRESHOLD = 10.0
+
+MORNING_COMMAND  = {'ct' : 447, 'bri' : 240, 'on' : True}
+DAY_COMMAND = {'ct' : 328, 'bri' : 254, 'on' : True}
 EVENING_COMMAND = {'ct' : 328, 'bri' : 254, 'on' : True}
 NIGHT_COMMAND  = {'ct' : 328, 'bri' : 127, 'on' : True}
 
 weather = None
+tsl = None
 
 def refresh_weather():
 	global weather
-	f = urllib2.urlopen('http://api.wunderground.com/api/' + WU_API_KEY + 
-	                    '/astronomy/conditions/q/' + ZIP_CODE + '.json')
+	f = urllib2.urlopen('http://api.wunderground.com/api/' + wu_api_key + 
+	                    '/astronomy/conditions/q/' + wu_station + '.json')
 	json_string = f.read()
 	weather = json.loads(json_string)
 	f.close()
@@ -62,7 +69,12 @@ def get_light_setting():
 						     minute=int(weather['sun_phase']['sunset']['minute']), 
 						     second=0)
 	if now < check_time:
-		return None
+	    lux = tsl.readlux()
+	    logging.info('Lux = ' + lux)
+		if (lux < DAYTIME_DARKNESS_THRESHOLD):
+			return LightSetting(command = DAY_COMMAND, timeout = DAY_TIMEOUT)
+		else:
+			return None
 		
 	check_time = now.replace(hour=22, minute=30, second=0)
 	if now < check_time:
@@ -73,14 +85,38 @@ def get_light_setting():
     
 def all_on(command):
 	logging.info('Lights on')
-	bridge.set_group(LIGHT_GROUP, command)
+#	bridge.set_group(light_group, command)
+	bridge.set_group(light_group, command)
 
 def all_off():
 	logging.info('Lights off')
-	bridge.set_group(LIGHT_GROUP, 'on', False)
+	bridge.set_group(light_group, 'on', False)
 	
 def motion_detected():
 	return io.input(PIR_PIN)
+
+# Read config file
+if os.access(os.getenv('HOME'), os.W_OK):
+	config_file_path = os.path.join(
+		os.getenv('HOME'), '.hue9000config')
+else:
+	config_file_path = os.path.join(os.getcwd(), '.hue9000config')
+	
+logging.info(config_file_path)
+
+try:
+	config = ConfigParser.SafeConfigParser()
+	config.read(config_file_path)
+	bridge_ip = config.get('hue', 'bridge_ip')
+	light_group = config.get('hue', 'light_group')
+	wu_api_key = config.get('weather', 'wu_api_key')
+	wu_station = config.get('weather', 'wu_station')
+except Exception as e:
+	logging.error('Error opening/reading config file: ' + config_file_path)
+	print e
+	exit(1)
+
+logging.info(light_group)
 
 # Set up the pin we'll be reading the PIR on
 io.setmode(io.BCM)
@@ -88,7 +124,7 @@ io.setup(PIR_PIN, io.IN)
 	
 # Connect to the hue bridge
 try:
-	bridge = phue.Bridge(BRIDGE_IP)
+	bridge = phue.Bridge(bridge_ip)
 except Exception as e:
 	print "Unable to connect to hue bridge."
 	print e
@@ -98,6 +134,9 @@ light_timer = None
 light_setting = None
 
 refresh_weather()
+
+# Set up light sensor
+tsl = TSL2561
 
 while True:
 	if motion_detected():

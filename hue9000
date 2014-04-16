@@ -1,0 +1,32 @@
+#!/bin/bash
+# /etc/init.d/hue9000
+
+### BEGIN INIT INFO
+# Provides:          servoblaster
+# Required-Start:    $remote_fs $syslog
+# Required-Stop:     $remote_fs $syslog
+# Default-Start:     2 3 4 5
+# Default-Stop:      0 1 6
+# Short-Description: hue9000 automatic light control
+# Description:       hue9000.py controls a Philips hue light setup
+### END INIT INFO
+
+
+case "$1" in 
+    start)
+        echo "Starting hue9000"
+	export HOME=/root
+        /home/pi/hue9000/hue9000.py 2>&1 | tee /tmp/hue9000.log &
+        ;;
+    stop)
+        echo "Stopping hue9000"	
+		HUE9000_PID=`ps auxwww | grep hue9000.py | head -1 | awk '{print $2}'`
+		kill -9 $HUE9000_PID
+        ;;
+    *)
+        echo "Usage: /etc/init.d/hue9000 start|stop"
+        exit 1
+        ;;
+esac
+
+exit 0
